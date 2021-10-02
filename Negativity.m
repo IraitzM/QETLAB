@@ -1,49 +1,52 @@
-%%  NEGATIVITY    Computes the negativity of a bipartite quantum state
+%%  Negativity Computes the negativity measure of entanglement
 %   This function has one required argument:
-%     RHO: a density matrix or a pure state vector
+%     rho: a matrix (density operator)
 %
-%   NEG = Negativity(RHO) is the negativity of the quantum state RHO,
-%   assuming that the two subsystems on which RHO acts are of equal
-%   dimension (if the local dimensions are unequal, specify them in the
-%   optional DIM argument). The negativity of RHO is the sum of the
-%   absolute value of the negative eigenvalues of the partial transpose of
-%   RHO.
+%   [N, W] = Negativity(rho) computes the multipartite negativity of
+%   entanglement for the matrix rho. It is based on the following work: 
+%   https://arxiv.org/abs/1010.6049
 %
-%   This function has one optional argument:
-%     DIM (default has both subsystems of equal dimension)
+%   It returns on N the negativity of entanglement and in W the
+%   witness constructed from said measure detecting entangled state defined
+%   by rho.
 %
-%   NEG = Negativity(RHO,DIM) is the same as above, where RHO acts on local
-%   systems of dimension specified by the 1-by-2 vector DIM.
-%
-%   URL: http://www.qetlab.com/Negativity
+%   URL: http://www.qetlab.com/GeometricMeasure
 
-%   requires: kpNorm.m, opt_args.m, PartialTranspose.m, PermuteSystems.m,
-%             pure_to_mixed.m, TraceNorm.m
-%   author: Nathaniel Johnston (nathaniel@njohnston.ca)
+%   requires: PartialTranspose.m
+%   author: Iraitz Montalban (iraitzm@gmail.com)
 %   package: QETLAB
-%   last updated: February 19, 2016
+%   last updated: July 23, 2021
 
-function neg = Negativity(rho,varargin)
+function [N,W] = Negativity(rho)
 
-rho = pure_to_mixed(rho); % Let the user input either a pure state vector or a density matrix.
-dX = size(rho);
-round_dim = round(sqrt(dX));
+%d(i) are the dimensions of the matrix
+[d1, d2]= size(rho);
+%where dimensions are the dimensinos in each local system, assuming all to
+%be two-dimensional
+n=log2(d1);
+dimensions=2*ones(1,n);
 
-% set optional argument defaults: dim = sqrt(length(dim))
-[dim] = opt_args({ round_dim' },varargin{:});
+cvx_begin sdp quiet
+    % W is the witness to be constructed
+    variable W(d1,d2) hermitian;
+    % P being part of the composable witness for all subsystems
+    variable P(d1,d2,2^(n-1)) hermitian;
+    minimize trace(rho*W);
+    subject to
+        % Half of the possible bipartitions given they are complementary
+        for m=1:2^(n-1)-1
+            % Obtain M bipartiton
+            dims = find(dec2bin(m,n) == '1');
+            % P
+            P(:,:,m) >= 0;
+            eye(d1,d1) - P(:,:,m) >= 0;
+            % Q
+            Q = W-P(:,:,m);
+            PartialTranspose(Q, dims, dimensions) >= 0;
+            eye(d1,d1) - PartialTranspose(Q, dims, dimensions) >= 0;
+        end
+cvx_end
 
-% allow the user to enter a single number for dim
-if(length(dim) == 1)
-    dim = [dim,dX(1)/dim];
-    if abs(dim(2) - round(dim(2))) >= 2*dX(1)*eps
-        error('Negativity:InvalidDim','If DIM is a scalar, RHO must be square and DIM must evenly divide length(RHO); please provide the DIM array containing the dimensions of the subsystems.');
-    end
-    dim(2) = round(dim(2));
-end
+% Negativity
+N = -trace(W*rho);
 
-if(prod(dim) ~= dX(1))
-    error('Negativity:InvalidDim','Please provide local dimensions in the argument DIM that match the size of RHO.');
-end
-
-% Compute the negativity.
-neg = (TraceNorm(PartialTranspose(rho,2,dim)) - 1)/2;
